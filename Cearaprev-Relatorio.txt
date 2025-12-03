@@ -1,0 +1,8 @@
+Cearaprev-Relatorio/
+│
+├── todos_os_lotes.csv          ← você coloca sua planilha aqui (atualiza quando quiser)
+├── src/
+│   └── Main.java               ← código abaixo
+├── lib/                        ← (opcional se usar .jar)
+└── .vscode/
+    └── launch.json             ← para dar F5 e rodar direto
