@@ -30,6 +30,44 @@ import java.util.Locale;
 
 public class Main {
     public static void main(String[] args) throws Exception {
+        // Detecta se está rodando sem bibliotecas (Run Java do VS Code)
+        try {
+            Class.forName("com.itextpdf.kernel.pdf.PdfDocument");
+        } catch (ClassNotFoundException e) {
+            System.out.println("\n=== EXECUTANDO VIA JAR COM BIBLIOTECAS ===\n");
+            String jarPath = "target\\cearaprev-report-jar-with-dependencies.jar";
+            
+            // Tenta encontrar o JAR na raiz do projeto
+            String dirAtual = System.getProperty("user.dir");
+            File jarFile = new File(dirAtual, jarPath);
+            
+            if (!jarFile.exists() && dirAtual.endsWith("src\\main\\java")) {
+                File dirProjeto = new File(dirAtual).getParentFile().getParentFile().getParentFile();
+                jarFile = new File(dirProjeto, jarPath);
+            }
+            
+            if (jarFile.exists()) {
+                // Executa o JAR com as bibliotecas
+                ProcessBuilder pb1 = new ProcessBuilder("java", "-jar", jarFile.getAbsolutePath());
+                pb1.inheritIO();
+                Process p1 = pb1.start();
+                p1.waitFor();
+                
+                // Executa também o modo inativos
+                System.out.println("\n\n=== GERANDO RELATÓRIO DE INATIVOS ===\n");
+                ProcessBuilder pb2 = new ProcessBuilder("java", "-jar", jarFile.getAbsolutePath(), "inativos");
+                pb2.inheritIO();
+                Process p2 = pb2.start();
+                p2.waitFor();
+                
+                System.out.println("\n✅ AMBOS OS RELATÓRIOS FORAM GERADOS COM SUCESSO!");
+            } else {
+                System.out.println("ERRO: JAR não encontrado em: " + jarFile.getAbsolutePath());
+                System.out.println("Execute: mvn clean package");
+            }
+            return;
+        }
+        
         System.setProperty("java.awt.headless", "true");
 
         // Verifica se deve filtrar apenas inativos
@@ -42,11 +80,21 @@ public class Main {
             System.out.println("    Para gerar relatório apenas de inativos, execute: java -jar programa.jar inativos\n");
         }
 
-        File csvFile = new File("todos_os_lotes.csv");
+        // Determinar o diretório do projeto (3 níveis acima de src/main/java)
+        String dirAtual = System.getProperty("user.dir");
+        File csvFile = new File(dirAtual, "todos_os_lotes.csv");
+        
+        // Se não encontrar no diretório atual, tentar na raiz do projeto
+        if (!csvFile.exists()) {
+            File dirProjeto = new File(dirAtual).getParentFile().getParentFile().getParentFile();
+            if (dirProjeto != null) {
+                csvFile = new File(dirProjeto, "todos_os_lotes.csv");
+            }
+        }
 
         if (!csvFile.exists()) {
-            System.out.println("ERRO: Coloque o arquivo 'todos_os_lotes.csv' na mesma pasta do programa!");
-            System.out.println("Baixe ou arraste sua planilha para cá e rode novamente.");
+            System.out.println("ERRO: Coloque o arquivo 'todos_os_lotes.csv' na raiz do projeto!");
+            System.out.println("Caminho esperado: " + csvFile.getAbsolutePath());
             return;
         }
 
@@ -61,7 +109,7 @@ public class Main {
         long[] totalInativosPorLote = new long[5]; // Total de inativos contados do CSV
 
         try (BufferedReader br = Files.newBufferedReader(csvFile.toPath(), StandardCharsets.UTF_8);
-             CSVParser parser = new CSVParser(br, CSVFormat.DEFAULT.withFirstRecordAsHeader().withDelimiter(';'))) {
+             CSVParser parser = new CSVParser(br, CSVFormat.DEFAULT.withFirstRecordAsHeader().withDelimiter(';').withIgnoreEmptyLines(true).withTrim(true).withAllowMissingColumnNames(true))) {
 
             for (CSVRecord r : parser) {
                 String loteStr = r.get("lote_suspensao").trim();
@@ -85,9 +133,31 @@ public class Main {
                     }
                 }
 
-                boolean provaFeita = r.get("status_cearaprev").contains("REALIZADA");
-                boolean recadastroFeito = r.get("status_recadastro").contains("REALIZADO");
-                String vinculo = r.get("status_vinculo");
+                // Lidar com BOM no primeiro cabeçalho
+                String statusCearaprev = "";
+                String statusRecadastro = "";
+                String vinculo = "";
+                
+                try {
+                    statusCearaprev = r.get("status_cearaprev");
+                } catch (IllegalArgumentException e) {
+                    statusCearaprev = r.get("\uFEFFstatus_cearaprev"); // Com BOM
+                }
+                
+                try {
+                    statusRecadastro = r.get("status_recadastro");
+                } catch (IllegalArgumentException e) {
+                    statusRecadastro = r.get("\uFEFFstatus_recadastro"); // Com BOM
+                }
+                
+                try {
+                    vinculo = r.get("status_vinculo");
+                } catch (IllegalArgumentException e) {
+                    vinculo = r.get("\uFEFFstatus_vinculo"); // Com BOM
+                }
+                
+                boolean provaFeita = statusCearaprev.contains("REALIZADA");
+                boolean recadastroFeito = statusRecadastro.contains("REALIZADO");
                 
                 // Verifica se é inativo (APOSENTADO, PENSIONISTA, PENSIONISTA_NAO_PREVIDENCIARIO)
                 boolean isInativo = !vinculo.contains("ATIVO") && !vinculo.contains("AGUARDANDO");
@@ -183,6 +253,16 @@ public class Main {
                          totalDesbloq, totalValor, totalValorBloqueados, totalGeralProcessado, nf, apenasInativos, dataHora);
     }
 
+    private static String getDiretorioSaida() {
+        String dirAtual = System.getProperty("user.dir");
+        File dir = new File(dirAtual);
+        // Se estiver em src/main/java, subir para raiz do projeto
+        if (dirAtual.endsWith("src\\main\\java") || dirAtual.endsWith("src/main/java")) {
+            dir = dir.getParentFile().getParentFile().getParentFile();
+        }
+        return dir.getAbsolutePath();
+    }
+
     private static void gerarGraficoEconomia4Lotes(double[] valorBloqueados, NumberFormat nf, boolean apenasInativos) throws IOException {
         DefaultPieDataset data = new DefaultPieDataset();
         data.setValue("Lote 1ª: R$ " + nf.format(valorBloqueados[1]), valorBloqueados[1]);
@@ -240,16 +320,18 @@ public class Main {
         // Remover sombras para visual mais limpo
         plot.setShadowPaint(null);
 
+        String dirSaida = getDiretorioSaida();
         String sufixo = apenasInativos ? "_inativos" : "";
-        File out = new File("grafico_economia" + sufixo + ".png");
+        File out = new File(dirSaida + File.separator + "grafico_economia" + sufixo + ".png");
         ChartUtils.saveChartAsPNG(out, chart, 800, 600);
     }
 
     private static void gerarRelatorioPDF(long[] totalOficial, long[] desbloqueados, double[] valorRetido, double[] valorBloqueados,
                                          long totalDesbloq, double totalValor, double totalValorBloqueados, long totalGeral, 
                                          NumberFormat nf, boolean apenasInativos, String dataHora) throws IOException {
+        String dirSaida = getDiretorioSaida();
         String sufixo = apenasInativos ? "_inativos" : "";
-        String filename = "relatorio_cearaprev" + sufixo + ".pdf";
+        String filename = dirSaida + File.separator + "relatorio_cearaprev" + sufixo + ".pdf";
         new File(filename).delete(); // Remove arquivo antigo
         
         PdfWriter writer = new PdfWriter(filename);
@@ -349,7 +431,7 @@ public class Main {
                 .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER);
         doc.add(graficosTitle);
 
-        String nomeGrafico = "grafico_economia" + sufixo + ".png";
+        String nomeGrafico = dirSaida + File.separator + "grafico_economia" + sufixo + ".png";
         File imgFile = new File(nomeGrafico);
         if (imgFile.exists()) {
             try {

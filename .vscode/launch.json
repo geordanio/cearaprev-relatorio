@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "java",
+            "name": "Gerar Relatórios CEARAPREV",
+            "request": "launch",
+            "mainClass": "Main",
+            "projectName": "Cearaprev-Relatorio",
+            "args": "",
+            "vmArgs": "-jar \"${workspaceFolder}/target/cearaprev-report-jar-with-dependencies.jar\""
+        }
+    ]
+}
